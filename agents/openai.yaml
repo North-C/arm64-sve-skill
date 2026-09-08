@@ -1,0 +1,4 @@
+interface:
+  display_name: "Arm64 Vector Acceleration"
+  short_description: "Identify and safely enable Neon and SVE hotspots"
+  default_prompt: "Use $arm64-vector-acceleration to find and validate an Arm64 SIMD optimization in this project."
