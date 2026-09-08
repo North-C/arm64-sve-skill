@@ -30,7 +30,7 @@ For C/C++ implementation or review, read [references/implementation-patterns.md]
 
 - Record repository revision, dirty-state boundary, target architecture, language, compiler and version, optimization/LTO flags, build type, and the actual runtime boundary: bare metal, container, VM, guest, or cross-build.
 - Locate architecture-specific implementations, callers, tests, benchmarks, and build ownership. Prefer structural code tools for symbols/call paths and literal search for flags, macros, and logs.
-- Run `scripts/probe-arm64-vector.sh` when C compiler and Linux HWCAP facts are useful. Its compile probes and runtime probes are separate evidence; neither substitutes for workload profiling.
+- Run the bundled `scripts/probe-arm64-vector.sh`, resolved from this skill's root, when C compiler and Linux HWCAP facts are useful. In Claude Code, invoke `${CLAUDE_SKILL_DIR}/scripts/probe-arm64-vector.sh`. Its compile probes and runtime probes are separate evidence; neither substitutes for workload profiling.
 - In a VM or container, make runtime decisions from the process that will execute the kernel. Host CPU features do not prove guest exposure.
 
 ### 2. Measure and rank candidates

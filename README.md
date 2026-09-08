@@ -50,7 +50,9 @@ skill 根据请求选择三种模式：
 
 ## 快速使用
 
-在包含本 skill 的仓库中，可以直接提出类似请求：
+在包含本 skill 的仓库中，可以显式调用，也可以让客户端根据 `description` 自动选择。Codex 使用 `$arm64-vector-acceleration`，Claude Code 使用 `/arm64-vector-acceleration`。
+
+Codex 示例：
 
 ```text
 使用 $arm64-vector-acceleration 分析当前项目的 CPU profile，找出最值得进行 Neon/SVE 优化的三个函数，只给出候选和证据，不修改代码。
@@ -64,7 +66,17 @@ skill 根据请求选择三种模式：
 使用 $arm64-vector-acceleration 审查这个 SVE 补丁，重点检查 HWCAP 分派、尾部 predicate、LTO 指令泄漏和基准可归因性。
 ```
 
-迁移到其他仓库时，应复制完整的 `arm64-vector-acceleration/` 目录到目标仓库的 `.agents/skills/`，不要只复制 `SKILL.md`，否则会丢失探针和按需参考资料。
+Claude Code 示例：
+
+```text
+/arm64-vector-acceleration 分析当前项目的 CPU profile，找出最值得进行 Neon/SVE 优化的三个函数，只给出候选和证据，不修改代码。
+```
+
+本仓库根目录是唯一内容源。迁移时应复制或克隆完整仓库，而不是只复制 `SKILL.md`：
+
+- Codex：放到目标项目的 `.agents/skills/arm64-vector-acceleration/`。
+- Claude Code：放到目标项目的 `.claude/skills/arm64-vector-acceleration/`。
+- 同时支持两者：保留一个实际目录，并让另一侧使用指向它的目录符号链接，避免两份内容漂移。
 
 ## 环境预检脚本
 
@@ -77,6 +89,12 @@ skill 根据请求选择三种模式：
 
 ```bash
 ./scripts/probe-arm64-vector.sh
+```
+
+Claude Code 从任意项目工作目录调用时，使用 skill 根目录变量：
+
+```bash
+${CLAUDE_SKILL_DIR}/scripts/probe-arm64-vector.sh
 ```
 
 使用指定编译器：
@@ -139,10 +157,24 @@ runtime.sve_vl_bytes=32
 
 ## 目录结构
 
+推荐的双客户端安装布局如下；这是目标项目中的发现布局，不是本仓库内部的重复副本：
+
 ```text
-arm64-vector-acceleration/
+.
+├── .agents/skills/arm64-vector-acceleration/
+│   └── ...                              # 唯一内容源，Codex 发现入口
+└── .claude/skills/arm64-vector-acceleration
+    -> ../../.agents/skills/arm64-vector-acceleration
+```
+
+独立仓库结构：
+
+```text
+arm64-sve-skill/
+├── AGENTS.md
 ├── README.md
 ├── SKILL.md
+├── VERSION
 ├── agents/
 │   └── openai.yaml
 ├── references/
@@ -158,7 +190,7 @@ arm64-vector-acceleration/
 - [references/validation-and-evidence.md](references/validation-and-evidence.md)：兼容性矩阵、正确性测试、制品检查和基准规范。
 - [references/overlaybd-case-study.md](references/overlaybd-case-study.md)：从 OverlayBD LSMT 优化中提炼的真实案例和证据边界。
 - [scripts/probe-arm64-vector.sh](scripts/probe-arm64-vector.sh)：工具链与运行时能力探针。
-- [agents/openai.yaml](agents/openai.yaml)：skill 的界面名称、简介和默认提示词。
+- [agents/openai.yaml](agents/openai.yaml)：Codex 的界面名称、简介和默认提示词；Claude Code 会忽略该产品专用元数据。
 
 ## 当前边界
 
