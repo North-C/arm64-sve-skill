@@ -1,31 +1,31 @@
-# Arm64 implementation patterns
+# Arm64 实现模式
 
-Read this reference for C/C++ implementation or review. Adapt examples to the project's existing build and CPU-feature facilities instead of copying them mechanically.
+实现或审查 C/C++ 向量路径时读取本参考。应适配项目已有的构建系统和 CPU feature 设施，不要机械复制示例。
 
-## Selection order
+## 实现选择顺序
 
-1. Keep the production scalar/baseline path.
-2. Inspect optimized assembly and compiler vectorization reports.
-3. Prefer a source change that enables safe auto-vectorization when it is clear and stable.
-4. Use Neon/SVE intrinsics when the compiler cannot express the kernel efficiently, exact instruction selection matters, or an existing multi-ISA design makes an intrinsic tier the simpler choice.
-5. Use handwritten assembly only when native benchmark and disassembly evidence justify its higher ABI and maintenance cost.
+1. 保留生产环境使用的 scalar/baseline 路径。
+2. 检查优化后的汇编和编译器向量化报告。
+3. 如果通过清晰、稳定的源码改动即可安全触发自动向量化，优先采用该方式。
+4. 当编译器无法有效表达 kernel、需要精确控制指令，或项目已有多 ISA 结构时，再使用 Neon/SVE intrinsic。
+5. 只有原生基准和反汇编证明收益足以覆盖 ABI 与维护成本时，才使用手写汇编。
 
-For Clang, use the project's optimization level plus `-Rpass=loop-vectorize`, `-Rpass-missed=loop-vectorize`, and `-Rpass-analysis=loop-vectorize`. For GCC, use the current compiler's `-fopt-info-vec*` options. Diagnostics explain a compiler decision; disassembly and benchmarks establish what shipped and whether it helped.
+Clang 使用项目原有优化级别，并按需增加 `-Rpass=loop-vectorize`、`-Rpass-missed=loop-vectorize` 和 `-Rpass-analysis=loop-vectorize`。GCC 使用当前版本支持的 `-fopt-info-vec*` 参数。诊断信息解释编译器为何作出选择；反汇编和基准才能证明最终制品包含什么、是否有收益。
 
-## Keep optional ISA code contained
+## 隔离可选 ISA 代码
 
-The most portable pattern is separate compilation:
+通常最便于审查和移植的方式是独立编译：
 
 ```text
-baseline TU/object: project Arm64 baseline; owns runtime detection and dispatch
-Neon TU/object:     baseline or explicit Advanced SIMD contract
-SVE TU/object:      -march=armv8.2-a+sve, scalable vector length
-SVE2 TU/object:     only when it contains SVE2-specific code and has its own gate
+baseline TU/object: 项目 Arm64 baseline；负责运行时检测和分派
+Neon TU/object:     baseline 或明确声明的 Advanced SIMD 契约
+SVE TU/object:      -march=armv8.2-a+sve，使用 scalable vector length
+SVE2 TU/object:     仅在包含 SVE2 专属代码并有独立 gate 时建立
 ```
 
-Do not apply a higher `-march` to the whole library or executable. Exclude optional files from broad source globs, then add them only after configure-time compilation succeeds. Probe the header, feature macro, and at least one representative intrinsic, not only whether the compiler accepts a flag. Prefer capability probes over compiler-version comparisons.
+不要把更高的 `-march` 应用到整个 library 或 executable。先从宽泛 source glob 中排除可选文件，再在配置阶段编译成功后显式加入。探针应覆盖 header、feature macro 和至少一个代表性 intrinsic，不能只检查编译器是否接受参数。优先使用能力探测，不依赖编译器版本字符串推断。
 
-For CMake, preserve the shape below while matching local conventions:
+CMake 可以保留以下结构，并按项目约定调整：
 
 ```cmake
 option(PROJECT_DISABLE_SVE "Disable SVE acceleration" OFF)
@@ -56,15 +56,15 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$" AND NOT PROJECT_DISABLE_SV
 endif()
 ```
 
-Do not run configure probes during cross compilation unless the build system explicitly supports execution on the target. A compile-only probe establishes toolchain support, not target HWCAP.
+交叉编译时，除非构建系统已经配置目标执行器，否则不要运行配置探针。compile-only 探针只证明工具链支持，不能证明目标机 HWCAP。
 
-### LTO and inlining
+### LTO 与内联
 
-Whole-program optimization can erase translation-unit containment. Use the project's supported no-LTO/no-inline boundary for optional kernels when necessary, or prove in the linked artifact that dispatch still dominates every path to optional instructions. Avoid optional-ISA code in headers, templates instantiated by baseline files, global constructors, and resolver code.
+全程序优化可能破坏 translation unit 隔离。必要时使用项目支持的 no-LTO/no-inline 边界，或者在最终链接制品中证明所有可选指令路径仍由运行时 gate 控制。避免把可选 ISA 代码放在 header、由 baseline 文件实例化的 template、全局构造函数或 feature resolver 中。
 
-## Runtime feature detection
+## 运行时 feature 检测
 
-On Linux AArch64, use the current process's ELF auxiliary vector:
+Linux AArch64 应读取当前进程的 ELF auxiliary vector：
 
 ```cpp
 #include <asm/hwcap.h>
@@ -81,28 +81,28 @@ const bool have_sve2 = false;
 #endif
 ```
 
-Prefer symbolic constants from platform headers. Do not hard-code bit positions, infer features from CPU model names, or use `/proc/cpuinfo` as the dispatch authority. Use an existing project CPU-feature library when it already models these facts correctly.
+优先使用平台 header 中的符号常量。不要硬编码 bit 位置，不要根据 CPU 型号推断，也不要把 `/proc/cpuinfo` 作为分派权威。如果项目已有正确建模这些能力的 CPU feature 库，应直接复用。
 
-On non-Linux systems, use the operating system's documented feature-discovery API and keep it behind the same project dispatch abstraction; do not transplant Linux auxiliary-vector assumptions.
+非 Linux 系统使用对应操作系统的正式 feature discovery API，并隐藏在同一项目分派抽象后；不要移植 Linux auxiliary-vector 假设。
 
-Compile-time macros such as `__ARM_FEATURE_SVE` describe the code-generation context; they do not prove the executing process may use SVE. Runtime HWCAP describes availability; it does not prove the optional object was compiled. Dispatch requires both facts.
+`__ARM_FEATURE_SVE` 等编译期 macro 描述代码生成上下文，不能证明执行进程可以使用 SVE。运行时 HWCAP 描述 feature 可用性，也不能证明可选 object 已经构建。安全分派必须同时满足两类条件。
 
-If the deployment ABI guarantees Advanced SIMD, document that contract. Otherwise preserve a scalar gate for `HWCAP_ASIMD`. Always gate SVE and SVE2 for a binary intended to run across heterogeneous Arm64 systems.
+如果部署 ABI 明确保证 Advanced SIMD，应记录该契约；否则为 `HWCAP_ASIMD` 保留 scalar gate。面向异构 Arm64 环境的二进制始终需要 gate SVE 和 SVE2。
 
-Resolve the tier once when practical:
+通常只解析一次 tier：
 
 ```text
-if SVE2 object was built and HWCAP2_SVE2 and SVE2 beats lower tiers -> SVE2
-else if SVE object was built and HWCAP_SVE -> SVE
-else if Neon object was built and HWCAP_ASIMD -> Neon
+if 已构建 SVE2 object && HWCAP2_SVE2 && SVE2 实测优于低阶 tier -> SVE2
+else if 已构建 SVE object && HWCAP_SVE -> SVE
+else if 已构建 Neon object && HWCAP_ASIMD -> Neon
 else -> baseline
 ```
 
-Use the project's thread-safe one-time initialization. A test-only override may force a lower supported tier for benchmarking, but it must reject a tier unavailable to the running process and must not become an undocumented production control.
+复用项目已有的线程安全 one-time initialization。测试专用 override 可以强制选择较低且受支持的 tier，但必须拒绝当前进程不可用的 tier，且不能成为未记录的生产控制接口。
 
-## SVE kernel shape
+## SVE kernel 形态
 
-Prefer vector-length-agnostic predicated loops:
+优先使用 vector-length-agnostic predicated loop：
 
 ```cpp
 for (size_t i = 0; i < count;) {
@@ -113,23 +113,23 @@ for (size_t i = 0; i < count;) {
 }
 ```
 
-Match predicate element width to the data. Preserve signedness, comparison direction, overflow behavior, reduction order, and floating-point rules. Do not assume a particular SVE width or that a wider architectural vector produces a proportional speedup; implementations can have different execution bandwidth.
+predicate 的元素宽度必须与数据匹配。保持 signedness、比较方向、溢出行为、归约顺序和浮点规则。不要假设具体 SVE 宽度，也不要假设架构向量更宽就会按比例提速；不同 CPU 的实际执行带宽可能不同。
 
-Use `-msve-vector-bits=scalable` or the compiler default for portable SVE. A numeric vector length is a deployment specialization and needs a runtime/packaging contract plus tests for that exact length.
+可移植 SVE 使用 `-msve-vector-bits=scalable` 或编译器默认设置。数值型固定 VL 属于部署特化，必须同时具备运行时/打包契约和对应 VL 测试。
 
-SVE2 implies SVE availability, but SVE2-specific intrinsics/instructions require their own compile and HWCAP2 gate. If one SVE1 object serves both SVE1 and SVE2 CPUs, log it as `SVE` and optionally record `host_sve2=true`; do not label the implementation tier `SVE2`.
+SVE2 CPU 同时支持 SVE，但 SVE2 专属 intrinsic/指令仍需要独立的编译与 HWCAP2 gate。如果一个 SVE1 object 同时服务 SVE1 和 SVE2 CPU，应记录为 `SVE`，可以另记 `host_sve2=true`，不能把实现 tier 标成 `SVE2`。
 
-## Other languages
+## 其他语言
 
-- **Rust:** inspect the pinned toolchain's `std::arch::aarch64` and `#[target_feature]` support before choosing intrinsics. Isolate optional functions, use runtime detection supported by that toolchain/platform, and audit inlining and LTO boundaries.
-- **Go:** prefer existing architecture-specific files, build constraints, assembler conventions, and the pinned `x/sys/cpu` API. Do not invent a second feature detector. Direct SVE support varies with the assembler/toolchain, so verify current source and documentation.
-- **Libraries/frameworks:** use their established multi-versioning or dispatch facility if it preserves baseline compatibility. Verify generated artifacts rather than assuming the abstraction contains the ISA.
+- **Rust：** 先检查固定 toolchain 中 `std::arch::aarch64` 和 `#[target_feature]` 的实际支持，再选择 intrinsic。隔离可选函数，使用该 toolchain/平台支持的运行时检测，并审查内联与 LTO 边界。
+- **Go：** 优先采用项目已有的架构文件、build constraint、assembler 约定和固定版本 `x/sys/cpu` API，不要创建第二套 feature detector。Go assembler/toolchain 对 SVE 的支持会变化，实施前核对当前源码和官方文档。
+- **库或框架：** 如果已有 multi-versioning 或 dispatch 设施且能保持 baseline 兼容，应直接复用。必须检查生成制品，不能假设抽象层已经正确隔离 ISA。
 
-## Authoritative references
+## 权威参考
 
-- Arm ACLE, including Neon/SVE headers, feature macros, predicates, and vector-length rules: <https://arm-software.github.io/acle/main/acle.html>
-- Linux arm64 ELF HWCAP contract: <https://docs.kernel.org/arch/arm64/elf_hwcaps.html>
-- Current GCC AArch64 options: <https://gcc.gnu.org/onlinedocs/gcc/AArch64-Options.html>
-- Current Clang language extensions and vectorization diagnostics: <https://clang.llvm.org/docs/LanguageExtensions.html>
+- Arm ACLE，包括 Neon/SVE header、feature macro、predicate 和 vector-length 规则：<https://arm-software.github.io/acle/main/acle.html>
+- Linux arm64 ELF HWCAP 契约：<https://docs.kernel.org/arch/arm64/elf_hwcaps.html>
+- GCC AArch64 参数：<https://gcc.gnu.org/onlinedocs/gcc/AArch64-Options.html>
+- Clang language extension 与向量化诊断：<https://clang.llvm.org/docs/LanguageExtensions.html>
 
-Check the pinned compiler/library documentation before implementation because feature APIs and attributes evolve.
+feature API 与 attribute 会演进；实施前必须核对项目固定版本的编译器或库文档。

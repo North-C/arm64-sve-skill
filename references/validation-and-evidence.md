@@ -1,130 +1,130 @@
-# Validation and evidence
+# 验证与证据
 
-Read this reference before claiming correctness, compatibility, or performance.
+在宣称正确性、兼容性或性能之前读取本参考。
 
-## Three independent claims
+## 三项独立结论
 
-Keep these claims separate:
+始终分开判断：
 
-1. **Toolchain containment:** the build can create the optional object while the distributable baseline remains compatible.
-2. **Functional correctness:** each kernel and runtime dispatch preserve semantics across supported inputs and targets.
-3. **Performance value:** the vector tier improves the selected native workload enough to justify its cost.
+1. **工具链与指令隔离：** 构建系统能够生成可选 object，同时保持可分发 baseline 的兼容性。
+2. **功能正确性：** 每个 kernel 和运行时分派在所有支持输入与目标上保持语义一致。
+3. **性能价值：** 向量 tier 在选定的原生工作负载中产生足以覆盖维护成本的收益。
 
-Passing one does not imply another.
+任意一项通过都不能推出另外两项。
 
-## Minimum compatibility matrix
+## 最小兼容性矩阵
 
-Adapt the matrix to the project's actual support policy and report every cell as pass, fail, skipped with reason, or not run.
+根据项目实际支持策略调整矩阵；每个单元格都记录为通过、失败、说明原因的跳过或未运行。
 
-| Target | Build | Start/fallback | Direct kernel correctness | Dispatch | Native performance |
+| 目标 | 构建 | 启动/fallback | 直接 kernel 正确性 | 分派 | 原生性能 |
 | --- | --- | --- | --- | --- | --- |
-| non-Arm CI | baseline; optional TUs excluded | N/A | architecture tests visibly skipped | N/A | N/A |
-| Arm64 without SVE | baseline + Neon as supported | must not execute SVE | baseline/Neon | lower tier selected | optional Neon A/B |
-| Arm64 SVE1 | SVE object included | yes | baseline/Neon/SVE | SVE selected | required for SVE claim |
-| Arm64 SVE2 | SVE1 and optional real SVE2 object | yes | all compiled tiers | highest valid tier | required for SVE2 claim |
-| old/minimum toolchain | optional object disabled if unsupported | baseline works | baseline tests | baseline/lower tier | N/A |
+| 非 Arm CI | baseline；排除可选 TU | N/A | 架构测试显式跳过 | N/A | N/A |
+| 无 SVE Arm64 | baseline + 受支持的 Neon | 不得执行 SVE | baseline/Neon | 选择低阶 tier | 可选 Neon A/B |
+| Arm64 SVE1 | 包含 SVE object | 通过 | baseline/Neon/SVE | 选择 SVE | SVE 结论必需 |
+| Arm64 SVE2 | SVE1 与可选的真实 SVE2 object | 通过 | 所有已编译 tier | 选择最高有效 tier | SVE2 结论必需 |
+| 最低/旧工具链 | 不支持时禁用可选 object | baseline 可用 | baseline 测试 | baseline/低阶 tier | N/A |
 
-For VMs, include guest kernel/VMM CPU configuration and facts observed inside the guest. For cross-builds, separate builder identity from execution-target identity.
+VM 环境还要记录 guest kernel、VMM CPU 配置和 guest 内部观察到的 feature。交叉编译应分开记录 builder 与 execution target 身份。
 
-## Correctness design
+## 正确性设计
 
-Use an independent scalar oracle written from the semantic contract, not a helper shared with the vector implementation. Directly invoke every compiled tier so an incorrect kernel cannot hide behind dispatch.
+从语义契约独立编写 scalar oracle，不要与向量实现共享容易同时出错的 helper。直接调用每个已编译 tier，避免错误 kernel 被自动分派隐藏。
 
-Select cases relevant to the operation:
+按操作选择测试输入：
 
-- zero, one, and small lengths;
-- lengths immediately below, equal to, and above Neon lane groups and every observed SVE vector length;
-- unaligned addresses and legal alias/overlap patterns;
-- minimum/maximum integers, signed transitions, carries, saturation, and reduction overflow;
-- exact-hit, no-hit, all-hit, sorted, repeated, and adversarial distributions for search/filter kernels;
-- NaN, infinities, signed zero, subnormals, rounding, and reassociation policy for floating point;
-- fixed-seed randomized/property tests and fuzzing for parsers or externally controlled data;
-- concurrent first-use when dispatch initialization is shared.
+- 长度为 0、1 和其他小值；
+- 刚好低于、等于和高于 Neon lane 分组及每个观测到的 SVE VL；
+- unaligned address 以及合法 alias/overlap 模式；
+- 整数最小/最大值、signed 边界、进位、饱和与归约溢出；
+- 搜索/过滤 kernel 的 exact-hit、no-hit、all-hit、有序、重复和对抗分布；
+- 浮点 NaN、无穷、signed zero、subnormal、rounding 和 reassociation 策略；
+- 固定 seed 的随机/property test，以及面向外部输入的 fuzzing；
+- 共享分派状态在并发首次调用时的初始化行为。
 
-Run sanitizers supported by the project. Predicated loads still require a correct predicate and valid base pointer. Inspect failures instead of treating a retry as a pass.
+运行项目支持的 sanitizer。Predicated load 仍然需要正确 predicate 和有效 base pointer。任何重试前先分析失败，不能把一次重试成功改写为原测试通过。
 
-Test automatic selection separately from direct kernels:
+自动选择与直接 kernel 分开测试：
 
-- log or expose the selected tier through an existing diagnostic seam;
-- prove SVE is not selected without `HWCAP_SVE`;
-- prove SVE2 is not selected without both a compiled SVE2 implementation and `HWCAP2_SVE2`;
-- prove the application starts and completes a representative operation on an unsupported machine;
-- verify a disable/rollback switch selects the lower tier.
+- 通过现有诊断接口记录或暴露所选 tier；
+- 证明没有 `HWCAP_SVE` 时不会选择 SVE；
+- 证明只有同时存在已编译 SVE2 实现和 `HWCAP2_SVE2` 时才会选择 SVE2；
+- 证明应用能在 unsupported machine 上启动并完成代表性操作；
+- 证明关闭/回退开关能够选择低阶 tier。
 
-## Artifact inspection
+## 制品检查
 
-Inspect per-tier objects and the linked artifact with the target-aware `objdump`/`llvm-objdump`, `readelf`, and symbol tools available in the project.
+使用项目可用且能识别目标架构的 `objdump`/`llvm-objdump`、`readelf` 和 symbol 工具检查每个 tier object 与最终制品。
 
-Record:
+记录：
 
-- compiler command/compile database entry for every tier;
-- disassembly around the kernel and dispatch;
-- evidence that intended Neon/SVE/SVE2 instructions are present;
-- evidence that optional instructions are not reachable before the runtime gate;
-- LTO/inlining status and symbol placement;
-- dynamic loader and architecture identity when packaging or cross-building.
+- 每个 tier 的编译命令或 compile database entry；
+- kernel 与 dispatch 周围的反汇编；
+- 预期 Neon/SVE/SVE2 指令确实存在的证据；
+- 可选指令在运行时 gate 前不可达的证据；
+- LTO/内联状态和 symbol 所属 object；
+- 打包或交叉编译时的 dynamic loader 与架构身份。
 
-Do not infer final binary compatibility from source macros or object flags alone.
+不能只根据源码 macro 或 object flag 推断最终二进制兼容性。
 
-## Benchmark protocol
+## 基准协议
 
-Maintain two scalar concepts when needed:
+必要时保留两个 scalar 概念：
 
-- an **oracle scalar** optimized for clarity and independence;
-- the **best pre-change production path**, compiled under normal production flags, used as the performance baseline.
+- **oracle scalar：** 以清晰和独立为目标，用于语义校验；
+- **变更前最佳生产路径：** 使用正常生产参数编译，作为性能 baseline。
 
-Prevent dead-code elimination and validate benchmark results during the run. Inspect the baseline disassembly: a “scalar” benchmark silently auto-vectorized by the compiler is not a scalar-kernel comparison, though it may still be the correct production baseline.
+防止 dead-code elimination，并在基准运行中校验输出。检查 baseline 反汇编：若所谓 scalar 已被编译器自动向量化，它不能作为纯 scalar kernel 对比，但仍可能是正确的生产 baseline。
 
-Capture the following identity with raw logs:
+随原始日志记录以下身份：
 
-- commit/diff and dirty boundary;
-- CPU model, topology, current-process HWCAP/HWCAP2, microcode/firmware if relevant;
-- OS/kernel, bare-metal/container/VM identity, and guest CPU exposure;
-- compiler/linker versions and exact flags, including LTO and vector-length policy;
-- selected runtime tier and SVE vector length for each run;
-- workload/data identity, input sizes/distribution, thread count, affinity/NUMA placement;
-- governor/frequency policy, competing load, warm-up, cooldown, run order, and repetition count.
+- commit/diff 和已有改动边界；
+- CPU 型号、拓扑、当前进程 HWCAP/HWCAP2，以及相关 microcode/firmware；
+- OS/kernel、bare-metal/container/VM 身份和 guest CPU 暴露；
+- 编译器/链接器版本与完整参数，包括 LTO 和 VL 策略；
+- 每轮运行选择的 tier 和 SVE VL；
+- 工作负载/数据身份、输入规模与分布、线程数、affinity/NUMA 放置；
+- governor/频率策略、竞争负载、warm-up、cooldown、运行顺序和重复次数。
 
-Use the same machine and controlled conditions for all tiers. Randomize or alternate run order when drift is plausible. Keep per-run values, errors, timeouts, and exclusions; state the complete denominator. Choose summary statistics appropriate to the metric and include uncertainty, not only the best sample.
+所有 tier 使用同一机器和受控条件。存在时间漂移风险时随机化或交替运行顺序。保留逐轮数据、错误、超时与排除项，并给出完整 denominator。根据指标选择合适统计量并报告不确定性，不能只展示最佳样本。
 
-Measure both:
+同时测量：
 
-- **kernel/microbenchmark:** cycles or time per operation, throughput, and useful counters such as instructions, branches, cache/TLB misses, and memory bandwidth;
-- **representative end to end:** user-visible latency/throughput/resource cost with the same workload and success criteria.
+- **kernel/microbenchmark：** 每操作 cycle 或时间、throughput，以及 instruction、branch、cache/TLB miss、memory bandwidth 等有用 counter；
+- **代表性端到端工作负载：** 在相同成功条件下测量用户可见 latency、throughput 或资源成本。
 
-Use the measured affected fraction `p` and kernel speedup `s` as a sanity check:
-
-```text
-maximum expected overall speedup = 1 / ((1 - p) + p / s)
-```
-
-If observed end-to-end movement is inconsistent with this bound, investigate workload drift, measurement error, or effects outside the selected kernel.
-
-QEMU or another emulator can expand functional coverage across vector lengths and feature combinations. It cannot establish native latency, throughput, or energy value.
-
-## Decision record template
+使用已测量的热点占比 `p` 和 kernel speedup `s` 检查系统收益上限：
 
 ```text
-Scope/revision:
-Request mode: discover | implement | review
-Workload and raw baseline:
-Measured hotspot and affected fraction:
-Semantic contract:
-Candidate assessment:
-ISA ladder and rejected tiers:
-Build probes:
-Runtime HWCAP facts:
-Containment/disassembly evidence:
-Correctness matrix:
-Benchmark identity and raw logs:
-Kernel result:
-End-to-end result:
-Failures/exclusions/denominator:
-Rollback or disable path:
-Verified facts:
-Inferences:
-Unknowns and next validation:
-Recommendation:
+最大预期整体加速比 = 1 / ((1 - p) + p / s)
 ```
 
-Recommend default enablement only when the evidence supports the project's compatibility and maintenance policy. A correct neutral result is a valid reason to keep the code experimental or remove it.
+如果观测到的端到端变化与该上限明显矛盾，应调查工作负载漂移、测量错误或所选 kernel 之外的影响。
+
+QEMU 等模拟器可以扩展不同 VL 和 feature 组合的功能覆盖，但不能建立原生 latency、throughput 或能耗结论。
+
+## 决策记录模板
+
+```text
+范围/revision：
+请求模式：发现 | 实现 | 审查
+工作负载与原始 baseline：
+已测量热点及占比：
+语义契约：
+候选评估：
+ISA 梯度与拒绝的 tier：
+构建探测：
+运行时 HWCAP 事实：
+隔离/反汇编证据：
+正确性矩阵：
+基准身份与原始日志：
+kernel 结果：
+端到端结果：
+失败/排除项/denominator：
+关闭或回退路径：
+已验证事实：
+合理推断：
+未知项和下一步验证：
+建议：
+```
+
+只有证据满足项目的兼容性和维护策略时，才建议默认启用。实现正确但收益中性时，可以保持实验状态或删除。

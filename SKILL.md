@@ -1,91 +1,95 @@
 ---
 name: arm64-vector-acceleration
-description: Identify measured Arm64 CPU hotspots and safely implement, enable, or review Neon (Advanced SIMD), SVE, and SVE2 acceleration with portable fallbacks, build-time feature probes, runtime dispatch, correctness tests, and attributable benchmarks. Use for native-code SIMD optimization or an existing Arm64 vector patch; do not use for generic Arm64 builds or unmeasured performance speculation.
+description: "识别已经测量确认的 Arm64 CPU 热点，并安全实现、使能或审查 Neon、SVE 与 SVE2 向量加速，包括可移植 fallback、构建能力探测、运行时分派、正确性测试和可归因基准。用于分析、迁移、实现或审查原生代码的 Arm64 SIMD 优化；不用于普通 Arm64 构建或没有测量依据的性能猜测。"
 ---
 
-# Arm64 Vector Acceleration
+# Arm64 向量加速
 
-Turn a measured Arm64 CPU hotspot into the smallest safe vectorized change. Preserve a portable production path and make every performance claim reproducible.
+把测量确认的 Arm64 CPU 热点转化为最小且安全的向量化改动。保留可移植的生产路径，并使每项性能结论都能复现。
 
-## Boundaries
+## 边界
 
-- Match the user's authorization. For analysis or review, inspect and report without editing. For implementation, change only the selected hotspot, its build wiring, tests, and necessary documentation.
-- Profile before optimizing. Source shape, an existing x86 SIMD path, or a compiler remark can suggest a candidate but cannot establish a bottleneck.
-- Keep fact, inference, and unknown separate. Do not claim acceleration from successful compilation, SIMD mnemonics, HWCAP visibility, a microbenchmark alone, or emulation.
-- Never apply `-march=native`, `+sve`, or `+sve2` to a distributable baseline target unless the declared deployment floor requires that ISA.
-- Preserve the best existing fallback. A vector tier that is unavailable, slower, or fails verification must be removable or disableable without changing semantics.
-- Treat Neon, SVE, SVE2, and SME as distinct contracts. Do not describe SVE1 code running on an SVE2 CPU as an SVE2 implementation.
+- 遵守用户授权范围。分析或审查请求只检查并报告；实现请求只修改选定热点、构建接线、测试和必要文档。
+- 先剖析再优化。源码形态、已有 x86 SIMD 路径或编译器报告只能提示候选，不能证明瓶颈。
+- 分开记录事实、推断和未知项。编译成功、出现 SIMD 指令、HWCAP 可见、单项微基准或模拟器结果都不能单独证明加速成立。
+- 除非已声明并验证部署 ISA 下限，否则不要给可分发的 baseline 目标全局添加 `-march=native`、`+sve` 或 `+sve2`。
+- 保留当前最佳 fallback。不可用、变慢或验证失败的向量 tier 必须能够在不改变语义的情况下禁用或移除。
+- 把 Neon、SVE、SVE2 和 SME 视为不同契约。不要把运行在 SVE2 CPU 上的 SVE1 实现称为 SVE2 实现。
 
-## Choose the work mode
+## 选择工作模式
 
-1. **Discover:** identify and rank measured vectorization candidates; stop with a recommendation and evidence unless implementation was requested.
-2. **Implement:** establish a baseline, add one ISA tier or one compiler-vectorization change, and validate it before adding another tier.
-3. **Review:** trace the changed kernel, build flags, dispatch, fallbacks, tests, and benchmark provenance. Report correctness or portability defects before speedups.
+1. **发现：** 识别并排序已经测量的向量化候选；除非用户要求实现，否则以建议和证据结束。
+2. **实现：** 建立 baseline，每次只增加一个 ISA tier 或一项编译器向量化改动，并在继续前完成验证。
+3. **审查：** 追踪变更后的 kernel、构建参数、分派、fallback、测试和基准来源；先报告正确性或可移植性问题，再讨论收益。
 
-For C/C++ implementation or review, read [references/implementation-patterns.md](references/implementation-patterns.md). For correctness or performance work, read [references/validation-and-evidence.md](references/validation-and-evidence.md). Read [references/overlaybd-case-study.md](references/overlaybd-case-study.md) only when adapting or explaining the OverlayBD-derived pattern.
+按任务读取参考资料：
 
-## Workflow and gates
+- 发现候选、选择 ISA 或寻找可迁移场景时，读取 [references/vectorization-use-cases.md](references/vectorization-use-cases.md)。
+- 实现或审查 C/C++ 路径时，读取 [references/implementation-patterns.md](references/implementation-patterns.md)。
+- 进行正确性验证或提出性能结论时，读取 [references/validation-and-evidence.md](references/validation-and-evidence.md)。
 
-### 1. Establish provenance and the real execution boundary
+## 工作流与门禁
 
-- Record repository revision, dirty-state boundary, target architecture, language, compiler and version, optimization/LTO flags, build type, and the actual runtime boundary: bare metal, container, VM, guest, or cross-build.
-- Locate architecture-specific implementations, callers, tests, benchmarks, and build ownership. Prefer structural code tools for symbols/call paths and literal search for flags, macros, and logs.
-- Run the bundled `scripts/probe-arm64-vector.sh`, resolved from this skill's root, when C compiler and Linux HWCAP facts are useful. In Claude Code, invoke `${CLAUDE_SKILL_DIR}/scripts/probe-arm64-vector.sh`. Its compile probes and runtime probes are separate evidence; neither substitutes for workload profiling.
-- In a VM or container, make runtime decisions from the process that will execute the kernel. Host CPU features do not prove guest exposure.
+### 1. 确认来源和真实执行边界
 
-### 2. Measure and rank candidates
+- 记录仓库 revision、已有改动边界、目标架构、语言、编译器及版本、优化/LTO 参数、构建类型，以及 bare metal、容器、VM、guest 或交叉编译等实际运行边界。
+- 找到架构特定实现、调用方、测试、基准和构建归属。符号与调用路径优先使用结构化代码工具，参数、宏和日志使用文本搜索。
+- 需要 C 编译器和 Linux HWCAP 事实时，运行 skill 根目录中的 `scripts/probe-arm64-vector.sh`。Claude Code 使用 `${CLAUDE_SKILL_DIR}/scripts/probe-arm64-vector.sh`。编译探测与运行时探测是两类独立证据，都不能替代工作负载剖析。
+- 在 VM 或容器中，从真正执行 kernel 的进程判断运行时能力；宿主机 CPU 特性不能证明 guest 已获得对应能力。
 
-- Reproduce the relevant workload and collect a profiler or trace baseline. Record raw output and the exact command.
-- Rank by inclusive/self cost, call frequency, input sizes, and the fraction of end-to-end time affected. Use Amdahl's law to reject kernels whose maximum system impact is immaterial.
-- Prefer dense, repeated work with independent lanes: comparisons, search/count/filter, reductions, transforms, codecs, checksums, parsing, and contiguous copies.
-- Penalize pointer chasing, unpredictable branches, synchronization, syscalls, allocation, I/O waits, tiny cold loops, irregular gather/scatter, and semantics that forbid safe reassociation.
-- Check optimized compiler output and vectorization diagnostics first. If auto-vectorization already produces an effective tier, improve source/alias information or keep it instead of duplicating it with intrinsics.
+### 2. 测量并排序候选
 
-**Gate:** do not implement SIMD unless the hotspot is measured, its scalar semantics are explicit, and the expected system impact justifies the added maintenance surface.
+- 复现代表性工作负载并收集 profiler 或 trace baseline，保留原始输出和完整命令。
+- 按 inclusive/self cost、调用频率、输入规模和受影响的端到端时间占比排序；使用 Amdahl 定律排除系统影响上限过低的 kernel。
+- 优先考虑 lane 之间独立且反复执行的密集计算，例如比较、搜索、计数、过滤、归约、变换、编解码、校验、解析和连续内存处理。
+- 降低指针追逐、不可预测分支、同步、系统调用、分配、I/O 等待、小型冷循环、不规则 gather/scatter，以及禁止安全重排的语义的优先级。
+- 先检查优化后的编译器输出和向量化报告。若自动向量化已经生成有效 tier，优先改善源码或 alias 信息，避免重复编写 intrinsic 实现。
 
-### 3. Design the ISA ladder
+**门禁：** 只有热点已经测量、scalar 语义明确，而且预期系统收益足以覆盖维护成本时，才实现 SIMD。
 
-Define the minimum useful ladder, normally `baseline -> Neon -> SVE`, adding SVE2 only for operations that use SVE2 instructions and show value.
+### 3. 设计 ISA 梯度
 
-- Compile baseline code for the project's supported Arm64 floor.
-- For a broadly distributed Linux binary, gate ISA-dependent execution with symbolic `HWCAP_*`/`HWCAP2_*` constants or an established project CPU-feature library. A deployment contract may replace a runtime gate only when it is explicit and verified.
-- Prefer a separate translation unit/object for SVE/SVE2. Apply feature flags only there, probe a real header and intrinsic at configure time, and keep a force-disable build option.
-- Dispatch before any optional instruction executes. Watch for LTO, inlining, static initialization, and compiler-generated instructions that can leak a higher ISA into baseline code.
-- Write SVE vector-length-agnostic loops using predicates and `svcnt*()` progress. Fix a vector length only when the complete deployment contract guarantees it and tests cover it.
-- Cache dispatch when its cost matters, using the project's existing thread-safe initialization pattern.
+定义满足目标的最小梯度，通常为 `baseline -> Neon -> SVE`；只有使用了 SVE2 专属指令且证明有价值时才增加 SVE2。
 
-**Gate:** the baseline artifact must build without optional headers/toolchain support and must start and run correctly on hardware where the optional HWCAP is absent.
+- 按项目支持的 Arm64 最低要求编译 baseline。
+- 对广泛分发的 Linux 二进制，使用符号化 `HWCAP_*`/`HWCAP2_*` 常量或项目已有 CPU feature 库限制 ISA 相关执行。只有明确且已验证的部署契约才能替代运行时 gate。
+- 优先把 SVE/SVE2 放入独立 translation unit/object，只对该目标添加 feature 参数；配置阶段编译真实 header 和 intrinsic，并保留强制关闭选项。
+- 在任何可选指令执行前完成分派；检查 LTO、内联、静态初始化和编译器生成指令是否把高阶 ISA 泄漏到 baseline。
+- 使用 predicate 与 `svcnt*()` 编写 SVE vector-length-agnostic 循环。只有完整部署契约保证固定 VL 且测试覆盖时，才能固定向量长度。
+- 分派开销有意义时，复用项目已有的线程安全初始化方式缓存选择结果。
 
-### 4. Implement one variable at a time
+**门禁：** baseline 制品必须能在没有可选 header/工具链支持时构建，并能在缺少可选 HWCAP 的硬件上启动和运行。
 
-- First preserve or create an independent scalar oracle that states exact comparison, overflow, floating-point, alignment, aliasing, tail, and empty-input behavior.
-- Implement the narrowest tier. Keep data layout and public interfaces unchanged unless the measured bottleneck requires otherwise.
-- For predicated SVE loads/stores, derive the predicate from the remaining logical elements; predication must prevent out-of-bounds access, not merely mask arithmetic.
-- Reuse existing project dispatch and test seams. Do not create a second CPU-feature registry or a permanent public ABI solely for tests.
-- Inspect the diff for newly duplicated state or parallel implementations without a platform reason.
+### 4. 每次只实现一个变量
 
-### 5. Prove correctness, containment, and value
+- 先保留或建立独立 scalar oracle，明确比较、溢出、浮点、对齐、alias、tail 和空输入语义。
+- 实现最窄的有效 tier。除非测量证明数据布局或公共接口就是瓶颈，否则保持它们不变。
+- 对 predicated SVE load/store，根据剩余逻辑元素生成 predicate；predicate 必须阻止越界访问，不能只屏蔽算术结果。
+- 复用项目已有分派和测试接口，不要创建第二套 CPU feature 注册表，也不要仅为测试引入永久公共 ABI。
+- 检查差异是否产生了没有平台理由的重复状态或并行实现。
 
-- Directly test every compiled kernel against the independent oracle, then test automatic dispatch and negative fallback behavior.
-- Cover lane boundaries, tails, empty/small inputs, extremes, alignment, aliasing, and domain-specific cases. Use fixed seeds for reproducible randomized tests and fuzz/property testing where appropriate.
-- Inspect the relevant objects and final artifact. Confirm optional instructions exist in the intended tier and do not appear in the baseline execution path.
-- Run correctness on non-SVE Arm64, SVE1, and SVE2 targets when supported. Emulation is acceptable for compatibility/correctness, never for performance claims.
-- Benchmark the best pre-change production path and each new tier on the same native machine, workload, binary policy, and controlled conditions. Retain all valid samples and failures.
-- Re-run the end-to-end workload. Report kernel speedup and end-to-end impact separately; keep regressions and neutral results.
+### 5. 证明正确性、隔离性和价值
 
-**Gate:** do not recommend enabling a tier by default until functional checks pass, unsupported-hardware fallback is proven, and native A/B evidence shows a worthwhile gain without material regression.
+- 直接把每个已编译 kernel 与独立 oracle 对比，再测试自动分派和负向 fallback。
+- 覆盖 lane 边界、tail、空/小输入、极值、对齐、alias 和领域特定场景；随机测试使用固定 seed，外部输入解析可增加 property test 或 fuzzing。
+- 检查对应 object 和最终制品，确认目标 tier 中存在预期指令，且 baseline 执行路径中没有可选指令。
+- 在项目支持范围内覆盖无 SVE Arm64、SVE1 和 SVE2。模拟器只用于兼容性或正确性，不能用于性能结论。
+- 在同一原生机器、工作负载、二进制策略和受控条件下比较变更前最佳生产路径与每个新 tier，保留全部有效样本和失败。
+- 重新运行端到端工作负载，分别报告 kernel speedup 和系统影响；保留退化与无显著变化结果。
 
-## Required result
+**门禁：** 只有功能检查通过、unsupported-hardware fallback 已证明，并且原生 A/B 显示值得维护且没有重大退化时，才建议默认启用新 tier。
 
-Return a concise evidence ledger containing:
+## 必需输出
 
-- scope, revision, and changed files or analysis boundary;
-- measured hotspot and affected workload fraction;
-- chosen ISA ladder and why rejected tiers were rejected;
-- compiler/build probes versus runtime HWCAP facts;
-- dispatch and baseline-containment proof;
-- correctness matrix with per-target results;
-- benchmark identity, raw-log locations, sample counts, failures, kernel results, and end-to-end results;
-- verified facts, reasonable inferences, remaining unknowns, rollback/disable path, and recommendation.
+返回简洁且可核验的 evidence ledger，包含：
 
-If hardware, permissions, toolchains, raw baselines, or representative workloads are missing, stop at the strongest supported conclusion and name the exact next validation command or environment needed.
+- 范围、revision、变更文件或分析边界；
+- 已测量热点及其工作负载占比；
+- 选择的 ISA 梯度，以及拒绝其他 tier 的理由；
+- 编译/构建能力与运行时 HWCAP 的独立事实；
+- 分派与 baseline 指令隔离证据；
+- 包含逐目标结果的正确性矩阵；
+- benchmark 身份、原始日志位置、样本数、失败、kernel 结果和端到端结果；
+- 已验证事实、合理推断、剩余未知项、关闭/回退路径和最终建议。
+
+若缺少硬件、权限、工具链、原始 baseline 或代表性工作负载，停在证据支持的最强结论，并给出下一步所需的准确命令或环境。

@@ -1,4 +1,4 @@
-# Arm64 Vector Acceleration Skill
+# Arm64 向量加速 Skill
 
 `arm64-vector-acceleration` 是一套面向原生代码项目的 Arm64 SIMD 优化工作流，用于从真实性能热点出发，鉴别并安全使能 Neon（Advanced SIMD）、SVE 和 SVE2 加速。
 
@@ -20,6 +20,7 @@
 | --- | --- |
 | 热点发现 | 根据 self/inclusive cost、调用频率、输入规模和端到端占比筛选候选 |
 | 向量化评估 | 识别连续比较、搜索、过滤、归约、编解码、校验和等适合并行的数据路径 |
+| 通用场景库 | 覆盖文本解析、DSP、图像视频、量化计算、HPC、网络、密码与内存变换等模式 |
 | 自动向量化诊断 | 使用编译器报告和反汇编判断是否已经生成有效 SIMD，避免重复实现 |
 | ISA 梯度设计 | 按需建立 `baseline -> Neon -> SVE -> SVE2` 路径，而不是提升整个二进制的 ISA 下限 |
 | 构建隔离 | 将 SVE/SVE2 放入独立 translation unit/object，并使用真实 intrinsic 做工具链探测 |
@@ -179,8 +180,8 @@ arm64-sve-skill/
 │   └── openai.yaml
 ├── references/
 │   ├── implementation-patterns.md
-│   ├── overlaybd-case-study.md
-│   └── validation-and-evidence.md
+│   ├── validation-and-evidence.md
+│   └── vectorization-use-cases.md
 └── scripts/
     └── probe-arm64-vector.sh
 ```
@@ -188,7 +189,7 @@ arm64-sve-skill/
 - [SKILL.md](SKILL.md)：触发条件、工作模式、主流程和强制门禁。
 - [references/implementation-patterns.md](references/implementation-patterns.md)：C/C++、CMake、HWCAP、LTO 和 SVE VLA 实现模式。
 - [references/validation-and-evidence.md](references/validation-and-evidence.md)：兼容性矩阵、正确性测试、制品检查和基准规范。
-- [references/overlaybd-case-study.md](references/overlaybd-case-study.md)：从 OverlayBD LSMT 优化中提炼的真实案例和证据边界。
+- [references/vectorization-use-cases.md](references/vectorization-use-cases.md)：搜索过滤、文本解析、图像音频、DSP、量化计算、HPC、密码、网络和内存处理等候选场景。
 - [scripts/probe-arm64-vector.sh](scripts/probe-arm64-vector.sh)：工具链与运行时能力探针。
 - [agents/openai.yaml](agents/openai.yaml)：Codex 的界面名称、简介和默认提示词；Claude Code 会忽略该产品专用元数据。
 
@@ -200,8 +201,8 @@ arm64-sve-skill/
 - 不把模拟器结果用于性能结论，也不把单一微基准结果直接外推为系统收益。
 - 不保证 Neon、SVE 或 SVE2 一定更快；正确但没有收益的实现应保持实验状态或删除。
 
-## 方法来源
+## 设计依据
 
-本 skill 的初始工程方法来自 containerd/overlaybd 的 LSMT inner-search Arm64 优化：利用已有 AVX-512 架构切入点，增加 Neon 和独立 SVE translation unit，通过编译能力探测与运行时 HWCAP 分派保持兼容，并使用独立标量实现交叉验证。
+本 skill 基于 Arm ACLE、Linux arm64 ELF HWCAP、GCC 和 Clang 的接口约定组织实现与验证方法，并把多种项目中反复出现的数据并行模式归纳为可筛选的候选场景。
 
-该案例的实现事实和性能证据边界记录在 [references/overlaybd-case-study.md](references/overlaybd-case-study.md)。通用化过程同时遵循 Arm ACLE、Linux arm64 ELF HWCAP、GCC 与 Clang 的当前接口约定；在具体项目实施前仍应核对其固定版本的编译器和依赖文档。
+场景和指令族映射见 [references/vectorization-use-cases.md](references/vectorization-use-cases.md)。这些映射只用于发现候选，不能替代具体项目的 profiler、正确性测试、制品检查和原生 A/B 基准；实施前仍应核对项目固定版本的编译器和依赖文档。
